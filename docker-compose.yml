@@ -1,0 +1,75 @@
+services:
+  proxy:
+    image: nginx:1.28.0-alpine
+    ports:
+      - "80:80"
+    environment:
+      PROXY_SCHEME: ${PROXY_SCHEME:-http}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      front:
+        ipv4_address: 172.30.10.2
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  app:
+    image: descubre-peru:${APP_VERSION:-1.0.0}
+    platform: linux/amd64
+    build: .
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL:?Genera .env antes de iniciar}
+      SESSION_SECRET: ${SESSION_SECRET:?Genera .env antes de iniciar}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-172.30.10.2}
+      SEED_ENABLED: ${SEED_ENABLED:-false}
+      SEED_USER1_PASSWORD: ${SEED_USER1_PASSWORD:-}
+      SEED_USER2_PASSWORD: ${SEED_USER2_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      front:
+        ipv4_address: 172.30.10.3
+      back: {}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 6s
+      retries: 10
+      start_period: 30s
+    init: true
+    restart: unless-stopped
+  db:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Genera .env antes de iniciar}
+      POSTGRES_USER: ${POSTGRES_USER:?Genera .env antes de iniciar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Genera .env antes de iniciar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - back
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+networks:
+  front:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+  back:
+    internal: true
+volumes:
+  postgres_data:

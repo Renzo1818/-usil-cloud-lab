@@ -1,0 +1,27 @@
+{
+  "name": "descubre-peru",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node scripts/init-db.js && node src/server.js",
+    "init-db": "node scripts/init-db.js",
+    "generate-env": "node scripts/generate-env.js",
+    "test": "node tests/config.test.js && node tests/auth.test.js",
+    "smoke": "node scripts/smoke-test.js",
+    "verify-persistence": "bash scripts/verify-persistence.sh"
+  },
+  "dependencies": {
+    "bcrypt": "6.0.0",
+    "connect-pg-simple": "10.0.0",
+    "ejs": "7.0.2",
+    "express": "5.3.0",
+    "express-rate-limit": "8.7.1",
+    "express-session": "1.19.0",
+    "helmet": "8.3.0",
+    "pg": "8.23.1"
+  }
+}

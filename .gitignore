@@ -1,0 +1,11 @@
+/context.md
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+*.log
+*.cookies
+playwright-report/
+test-results/
+.tmp/
