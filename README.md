@@ -7,7 +7,62 @@ Esta guía incluye dos rutas: construir los archivos desde una carpeta vacía (s
 - Código completo: [rama dev](https://github.com/Renzo1818/-usil-cloud-lab/tree/dev).
 - Imagen de referencia: [renzo1818/descubre-peru:1.0.0](https://hub.docker.com/r/renzo1818/descubre-peru).
 
-## Arquitectura y decisiones
+## Arquitectura cloud y decisiones
+
+![Diagrama propio de la arquitectura cloud de Descubre el Perú en Blitz](assets/arquitectura-cloud-descubre-peru.png)
+
+El diagrama sigue la distribución del ejemplo académico y representa la solución desplegada en Blitz como una arquitectura lógica: entrada HTTPS de la plataforma, contenedor de aplicación y PostgreSQL administrado privado.
+
+- **Entrada HTTPS gestionada:** Blitz cifra el acceso del navegador y dirige las solicitudes hacia la aplicación, que escucha internamente en el puerto 8080.
+- **Imagen propia versionada:** Docker Hub distribuye `renzo1818/descubre-peru:1.0.0` para `linux/amd64`. La descarga ocurre durante el despliegue y no forma parte de cada petición del usuario.
+- **Base administrada privada:** la aplicación accede a PostgreSQL mediante `DATABASE_URL`, sin exponer el puerto de la base a internet.
+- **Persistencia administrada:** los usuarios y las sesiones permanecen en PostgreSQL al reiniciar o reemplazar la aplicación. El almacenamiento cloud es gestionado por Blitz; `postgres_data` corresponde al entorno local.
+- **Inicialización reproducible:** la aplicación crea el esquema al arrancar y añade usuarios de prueba cuando `SEED_ENABLED=true`. Los secretos se proporcionan por variables de entorno.
+
+El contenedor propio de este despliegue es la aplicación. La entrada HTTPS y PostgreSQL se muestran como servicios de la plataforma, sin atribuirles una implementación interna específica ni presentarlos como contenedores de nuestro Compose.
+
+<details>
+<summary>Prompts utilizados para generar la arquitectura cloud</summary>
+
+Generación con la herramienta integrada de imágenes. La imagen del ejemplo del usuario se utilizó como referencia de composición.
+
+```text
+Use case: infographic-diagram. Genera una NUEVA imagen de arquitectura CLOUD de la aplicación "Descubre el Perú", en español. Imagen 1 es una REFERENCIA VISUAL: imita su distribución de cajas, fronteras discontinuas y flechas limpias, pero adapta los componentes a la arquitectura real de Blitz Cloud descrita abajo. No copies sus tres etiquetas de contenedores, porque nuestro despliegue usa servicios administrados. Formato horizontal, fondo blanco, azul marino y azul claro como la referencia, tipografía sans serif grande y precisa, diseño técnico sobrio para exposición universitaria, sin adornos ni personajes. Mantén todas las etiquetas perfectamente legibles.
+
+Título superior: "Descubre el Perú · Arquitectura cloud".
+Gran marco exterior discontinuo azul, que ocupa centro y derecha, con título "Blitz Cloud · Plataforma administrada".
+
+Fuera de ese marco, a la izquierda, coloca caja azul claro "Usuario" / "(navegador)". Debajo del usuario, otra caja blanca discontinua "Docker Hub", seguida de "renzo1818/descubre-peru:1.0.0" y "linux/amd64".
+
+Dentro del gran marco, tres componentes alineados horizontalmente:
+1. Caja azul marino "ENTRADA DE PLATAFORMA" / "HTTPS de Blitz" / "TLS y certificado gestionados". Encima, etiqueta verde "Entrada pública HTTPS".
+2. Caja azul marino "CONTENEDOR DE APLICACIÓN" / "Node.js + Express + EJS" / "Login y bienvenida protegida" / "Puerto interno 8080".
+3. Caja azul marino "BASE ADMINISTRADA" / "PostgreSQL 17" / "Usuarios y sesiones". Encima, etiqueta roja "Sin puerto público".
+NO etiquetar los tres elementos como contenedores. Solo la aplicación es un contenedor propio.
+
+Conexiones de comunicación continuas y con puntas en ambos extremos: Usuario ↔ entrada HTTPS, con etiqueta "HTTPS · 443"; entrada HTTPS ↔ aplicación, con etiqueta "HTTP interno · 8080"; aplicación ↔ PostgreSQL, con etiqueta "SQL · 5432" y pequeña etiqueta "DATABASE_URL". No hay conexión directa del navegador ni de la entrada HTTPS con la base.
+
+Una segunda frontera discontinua azul claro dentro de Blitz rodea únicamente aplicación y base; etiqueta "Comunicación privada de la plataforma". Debajo de la base, conecta un cilindro "Almacenamiento persistente" / "gestionado por Blitz". Esto es persistencia del servicio administrado, NO un volumen Docker creado por nuestro proyecto.
+
+Desde la caja Docker Hub, dibuja una flecha discontinua de despliegue que entra al marco y termina en la caja de aplicación, con etiqueta "pull de imagen". Haz que ese trazado pase por debajo de la entrada HTTPS sin cruzar flechas de usuario. Docker Hub NO aparece en la ruta de una petición web.
+
+Franja inferior muy breve de tres justificaciones: "Seguridad: HTTPS y base privada" · "Portabilidad: imagen propia versionada" · "Operación: TLS y PostgreSQL administrados".
+Nota pequeña al pie: "La app inicializa tablas y usuarios al arrancar. Secretos mediante variables de entorno."
+
+Precisión: la imagen debe mostrar solo cloud. No dibujar Codespaces, Docker Compose, red back, Nginx propio ni postgres_data. No inventar implementación interna, balanceadores extra, escalado automático, URLs públicas, passwords ni tokens. Usa solo los componentes descritos.
+```
+
+Ajuste final de la nota de inicialización, conservando el resto del diagrama:
+
+```text
+Edita únicamente la nota inferior de esta imagen. Conserva exactamente toda la composición, colores, cajas, diagramas, flechas, etiquetas y resolución. Sustituye la frase inferior "La app inicializa tablas y usuarios al arrancar. Secretos mediante variables de entorno." por este texto exacto, centrado y completamente legible: "Esquema al arrancar · Usuarios de prueba con SEED_ENABLED=true · Secretos por variables de entorno". No hagas ningún otro cambio.
+```
+
+</details>
+
+<details>
+<summary>Diagrama comparativo anterior: entorno local y cloud</summary>
+
 
 ![Diagrama propio de la arquitectura local y cloud de Descubre el Perú](assets/arquitectura-descubre-peru.png)
 
@@ -44,6 +99,8 @@ Pequeña nota final: "Blitz aporta HTTPS y una base administrada. Secretos media
 
 Prioriza exactitud técnica, jerarquía visual y legibilidad. No incluir contraseñas, tokens, URLs inventadas, promesas de escalado automático ni servicios adicionales.
 ```
+
+</details>
 
 </details>
 
