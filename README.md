@@ -7,6 +7,46 @@ Esta guía incluye dos rutas: construir los archivos desde una carpeta vacía (s
 - Código completo: [rama dev](https://github.com/Renzo1818/-usil-cloud-lab/tree/dev).
 - Imagen de referencia: [renzo1818/descubre-peru:1.0.0](https://hub.docker.com/r/renzo1818/descubre-peru).
 
+## Arquitectura y decisiones
+
+![Diagrama propio de la arquitectura local y cloud de Descubre el Perú](assets/arquitectura-descubre-peru.png)
+
+- **Separación de servicios:** Nginx concentra la entrada HTTP, Express ejecuta la lógica y PostgreSQL almacena usuarios y sesiones. Cada componente tiene una responsabilidad definida.
+- **Aislamiento de la base:** solo Nginx publica el puerto 80; app y DB comparten la red interna `back`. El proxy no pertenece a esa red.
+- **Persistencia local:** el volumen `postgres_data` conserva los datos cuando se recrea el contenedor PostgreSQL. En Blitz el almacenamiento pertenece a la base administrada.
+- **Portabilidad:** una imagen propia versionada para `linux/amd64` permite trasladar la aplicación desde Docker Hub a Blitz con su configuración de ejecución.
+- **Autenticación segura:** bcrypt protege las contraseñas almacenadas, las consultas parametrizadas separan datos y SQL, y PostgreSQL conserva las sesiones fuera del proceso Node.
+- **Servicios administrados en nube:** Blitz proporciona la entrada HTTPS y PostgreSQL privado. El despliegue cloud utiliza la app desde Docker Hub, sin trasladar el Compose local ni su Nginx.
+
+La imagen se generó con la herramienta integrada de generación de imágenes a partir de `docker-compose.yml`, Dockerfile y el código de autenticación del proyecto. Las flechas discontinuas representan publicación y despliegue; las continuas, comunicación durante el uso de la aplicación.
+
+<details>
+<summary>Prompt utilizado para generar el diagrama</summary>
+
+```text
+Use case: infographic-diagram. Crea una infografía técnica original, horizontal, de alta resolución, en español, para el informe académico de una aplicación de turismo del Perú. Título exacto: "Descubre el Perú · Arquitectura de la solución". Estética editorial limpia, fondo arena claro, verde oscuro y terracota, líneas nítidas, iconos técnicos sencillos y texto grande legible. Sin fotografías ni decoración que dificulte leer. Composición en dos franjas de arquitectura y una franja inferior de justificación. Mantén correctos los acentos y todas las etiquetas.
+
+FRANJA 1: "LOCAL · GITHUB CODESPACES". Flujo de izquierda a derecha: navegador externo → Nginx → aplicación → PostgreSQL. Un marco "Docker Compose · 3 contenedores" encierra solo Nginx, app y PostgreSQL; debajo de DB hay un símbolo de almacenamiento, que NO es otro contenedor.
+Etiquetas de los nodos: "Navegador"; "proxy · Nginx" y "HTTP :80"; "app · Node.js + Express" y "EJS · :8080"; "db · PostgreSQL 17.11" y ":5432 · usuarios y sesiones".
+Conector Nginx→app: "Red front". Conector app→DB: "Red back · internal: true". Una conexión DB→almacenamiento etiquetado "postgres_data · volumen local".
+Nota visible: "Solo se publica el puerto 80. App y DB sin puertos al host." Otra nota: "En Codespaces, HTTPS termina en el reenvío; Nginx recibe HTTP." No dibujes conexión Nginx→DB. La app participa en ambas redes, DB solo en back.
+
+FRANJA 2: "NUBE · BLITZ CLOUD". Flujo navegador → "Entrada HTTPS · Blitz" → "Aplicación · :8080" → "PostgreSQL 17 · administrado privado". La conexión HTTPS exterior termina en la entrada de Blitz. Conector app→DB: "DATABASE_URL · red privada". DB almacena "usuarios y sesiones". No dibujes un Nginx propio ni un volumen Docker ni un contenedor DB propio en Blitz.
+En una pequeña línea de despliegue separada de las peticiones web: "Dockerfile" → "Docker Hub · renzo1818/descubre-peru:1.0.0" → aplicación cloud. Etiqueta esa línea "Publicación y despliegue · linux/amd64", con trazos discontinuos. Docker Hub NO forma parte del recorrido de una petición del usuario. Las bases local y cloud son independientes y NO están conectadas entre sí.
+
+FRANJA INFERIOR: título "¿Por qué esta arquitectura?" y cinco tarjetas compactas, con estas frases exactas:
+"Separación: proxy, lógica y datos se mantienen por separado."
+"Aislamiento: PostgreSQL no publica puertos y usa una red privada."
+"Persistencia: el volumen local conserva los datos al recrear DB."
+"Portabilidad: imagen propia versionada para linux/amd64."
+"Seguridad: bcrypt, SQL parametrizado y sesiones en PostgreSQL."
+Pequeña nota final: "Blitz aporta HTTPS y una base administrada. Secretos mediante variables de entorno."
+
+Prioriza exactitud técnica, jerarquía visual y legibilidad. No incluir contraseñas, tokens, URLs inventadas, promesas de escalado automático ni servicios adicionales.
+```
+
+</details>
+
 ## 0. Construir desde una carpeta vacía
 
 Esta ruta crea los archivos de la aplicación sin clonar el proyecto. Si quieres ejecutar el código existente, utiliza la ruta de clonación de la sección 1. Después de completar esta sección, continúa en la sección 2; no vuelvas a clonar sobre el proyecto recién creado.
