@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#a63d2f"><title>Explora destinos · Descubre el Perú</title><link rel="stylesheet" href="/assets/styles.css"></head>
+<body><a class="skip" href="#contenido">Ir al contenido</a>
+<header class="site-header"><a class="brand" href="/">PERÚ<span>un viaje que se queda contigo</span></a><form action="/logout" method="post"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="logout" type="submit">Cerrar sesión <span aria-hidden="true">↗</span></button></form></header>
+<main id="contenido" class="explore"><section class="welcome-intro"><p class="eyebrow">EL VIAJE ES TUYO</p><h1>Bienvenido, <%= name %></h1><p class="lead">Seis destinos, infinitas formas de sentir el Perú.</p><div class="region-pills"><span>Costa</span><span>Sierra</span><span>Selva</span></div></section>
+<section aria-labelledby="destinos-title"><div class="section-heading"><h2 id="destinos-title">Lugares que dejan huella</h2><span>UNA MIRADA AL PERÚ / 01—06</span></div>
+<div class="destinations"><% destinations.forEach((destination, index) => { %>
+<article class="destination"><div class="destination-art <%= destination.style %>" aria-hidden="true"><span class="art-number">0<%= index + 1 %></span><span class="art-icon"><%= destination.icon %></span><span class="art-caption"><%= destination.name %></span></div><div class="destination-body"><p class="eyebrow"><%= destination.region %></p><h3><%= destination.name %></h3><p><%= destination.text %></p></div></article>
+<% }); %></div></section><aside class="travel-note"><span aria-hidden="true">✳</span><div><h2>Viaja con respeto</h2><p>Cuida los paisajes, valora las comunidades y lleva contigo solo recuerdos.</p></div></aside></main>
+<footer>Hecho para explorar, aprender y conectar.<span>PERÚ · TURISMO Y CULTURA</span></footer>
+</body></html>

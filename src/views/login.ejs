@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#a63d2f"><title>Descubre el Perú · Iniciar sesión</title><link rel="stylesheet" href="/assets/styles.css"></head>
+<body class="login-page">
+<a class="skip" href="#contenido">Ir al contenido</a>
+<header class="site-header"><a class="brand" href="/">PERÚ<span>un viaje que se queda contigo</span></a><span class="header-note">COSTA · SIERRA · SELVA</span></header>
+<main id="contenido" class="login-layout">
+<section class="intro"><p class="eyebrow">MIL PAISAJES. UN SOLO PAÍS.</p><h1>Descubre<br>el <em>Perú.</em></h1><p class="lead">Entre el Pacífico, los Andes y la Amazonía, tu próxima historia está por comenzar.</p>
+<div class="landscape" role="img" aria-label="Ilustración de montañas andinas, sol y río"><span class="sun"></span><span class="mountain far"></span><span class="mountain near"></span><span class="river"></span><span class="landscape-label">UN TERRITORIO DE ENCUENTROS</span></div>
+<div class="region-labels"><span>01 / Costa</span><span>02 / Sierra</span><span>03 / Selva</span></div>
+</section>
+<section class="login-card" aria-labelledby="login-title"><p class="eyebrow">TU VIAJE EMPIEZA AQUÍ</p><h2 id="login-title">Un país por explorar</h2><p>Inicia sesión para descubrir destinos que inspiran.</p>
+<% if (error) { %><p class="error" role="alert"><%= error %></p><% } %>
+<form action="/login" method="post"><input type="hidden" name="_csrf" value="<%= csrf %>">
+<label for="username">Usuario</label><input id="username" name="username" autocomplete="username" maxlength="64" required placeholder="Tu usuario">
+<label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="72" required placeholder="Tu contraseña">
+<button type="submit">Comenzar a explorar <span aria-hidden="true">↗</span></button>
+</form><p class="form-note">Acceso para usuarios de demostración.<br>Un recorrido por la diversidad del Perú.</p></section>
+</main><footer>Hecho para explorar, aprender y conectar.<span>PERÚ · TURISMO Y CULTURA</span></footer>
+</body></html>

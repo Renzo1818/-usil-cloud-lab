@@ -1,0 +1,12 @@
+{
+  "name": "Descubre el Perú",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" }
+  },
+  "forwardPorts": [80],
+  "portsAttributes": {
+    "80": { "label": "Descubre el Perú", "onAutoForward": "notify", "visibility": "private" }
+  }
+}
