@@ -4,8 +4,7 @@ Aplicación de turismo del Perú con login contra PostgreSQL, saludo personaliza
 
 Esta guía permite replicar el proyecto desde GitHub Codespaces, comprobar los tres contenedores y publicar una instancia propia en Blitz Cloud. Ejecuta los comandos desde la raíz del repositorio, en el orden indicado.
 
-- Código completo: [rama codex/descubre-peru](https://github.com/Renzo1818/-usil-cloud-lab/tree/codex/descubre-peru).
-- Revisión del código: [pull request #1](https://github.com/Renzo1818/-usil-cloud-lab/pull/1).
+- Código completo: [rama dev](https://github.com/Renzo1818/-usil-cloud-lab/tree/dev).
 - Imagen de referencia: [renzo1818/descubre-peru:1.0.0](https://hub.docker.com/r/renzo1818/descubre-peru).
 
 ## 1. Obtener el código y preparar Codespaces
@@ -13,7 +12,7 @@ Esta guía permite replicar el proyecto desde GitHub Codespaces, comprobar los t
 Necesitas cuentas de GitHub, Docker Hub y Blitz Cloud. Revisa los límites de uso de cada cuenta antes de crear recursos; el desarrollo y las pruebas de la actividad se realizan en Codespaces.
 
 1. Abre el repositorio de GitHub del enlace anterior. Si necesitas tu propia copia, crea un **Fork** que incluya la rama de implementación. Si el formulario ofrece copiar solo `main`, desactiva esa opción; no copies únicamente esa rama mientras todavía contenga la versión estática.
-2. Selecciona **codex/descubre-peru** en el selector de ramas. Si la implementación ya fue integrada a tu rama principal, selecciona esa rama.
+2. Selecciona **dev** en el selector de ramas. Si la implementación ya fue integrada a tu rama principal, selecciona esa rama.
 3. Pulsa **Code → Codespaces** y crea un Codespace para la rama seleccionada. GitHub prepara el entorno a partir de `.devcontainer/devcontainer.json`.
 4. Abre la terminal y comprueba:
 
@@ -29,7 +28,7 @@ docker compose version
 Para obtener el mismo código mediante una terminal con Git, como alternativa al clonado automático de Codespaces:
 
 ```bash
-git clone --branch codex/descubre-peru --single-branch https://github.com/Renzo1818/-usil-cloud-lab.git
+git clone --branch dev --single-branch https://github.com/Renzo1818/-usil-cloud-lab.git
 cd ./-usil-cloud-lab
 ```
 
