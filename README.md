@@ -32,15 +32,52 @@ git clone --branch dev --single-branch https://github.com/Renzo1818/-usil-cloud-
 cd ./-usil-cloud-lab
 ```
 
-El Dockerfile instala las dependencias con `npm ci --omit=dev` y el lockfile. No es necesario instalar paquetes npm en el host para levantar Compose.
+### Alternativa: crear y abrir Codespaces desde GitHub CLI
+
+Desde una terminal con [GitHub CLI instalado](https://cli.github.com/), antes de entrar a un Codespace nuevo:
+
+```bash
+gh --version
+if ! gh auth status; then
+  gh auth login
+fi
+gh codespace create --repo Renzo1818/-usil-cloud-lab --branch dev
+gh codespace list
+gh codespace code --web
+```
+
+El último comando permite elegir el Codespace que se abrirá en el navegador. Si trabajas con un fork, sustituye el repositorio por el de tu cuenta. Si ya estás dentro del Codespace correcto, continúa al paso 2 sin crear otro.
+
+Si necesitas crear el fork desde esa otra cuenta mediante CLI, autentícate primero y ejecuta este comando antes de crear su Codespace:
+
+```bash
+gh repo fork Renzo1818/-usil-cloud-lab --clone=false --remote=false
+```
+
+Conserva todas las ramas: no añadas `--default-branch-only`. Después usa el nombre de tu fork en `gh codespace create --repo`.
+
+### Dependencias npm
+
+El Dockerfile instala las dependencias con `npm ci --omit=dev` y el lockfile. Para revisar también las dependencias desde el host, de forma opcional:
+
+```bash
+npm ci --no-audit --no-fund
+npm ls --depth=0
+```
+
+Esto no levanta la aplicación ni PostgreSQL. Las pruebas completas se ejecutan mediante los comandos de la etapa 4.
 
 ## 2. Generar la configuración privada
 
 Ejecuta:
 
 ```bash
-node scripts/generate-env.js
+if [ ! -f .env ]; then
+  node scripts/generate-env.js
+fi
+chmod 600 .env
 git check-ignore .env
+code .env
 ```
 
 **Resultado esperado:** se crea `.env`, y Git indica que está excluido. El generador produce contraseñas aleatorias y un secreto de sesión de 64 caracteres hexadecimales, con permisos de archivo `600`. Si `.env` ya existe, el script se detiene sin modificarlo: conserva su contenido y revisa sus variables en el editor privado.
@@ -57,6 +94,23 @@ PROXY_SCHEME=http
 TRUST_PROXY=172.30.10.2
 SEED_ENABLED=true
 APP_VERSION=1.0.0
+```
+
+Para establecer el modo HTTP desde la terminal sin mostrar secretos:
+
+```bash
+sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=false/; s/^PROXY_SCHEME=.*/PROXY_SCHEME=http/; s/^TRUST_PROXY=.*/TRUST_PROXY=172.30.10.2/' .env
+```
+
+Para comprobar únicamente la longitud de los secretos, sin imprimir sus valores:
+
+```bash
+node --env-file=.env --input-type=module <<'NODE'
+for (const name of ['SESSION_SECRET', 'SEED_USER1_PASSWORD', 'SEED_USER2_PASSWORD']) {
+  const value = process.env[name];
+  console.log(`${name}: ${value ? Buffer.byteLength(value) : 0} bytes`);
+}
+NODE
 ```
 
 Conserva los valores aleatorios generados para `POSTGRES_PASSWORD`, `DATABASE_URL`, `SESSION_SECRET` y las dos contraseñas de seed. Localmente, `DATABASE_URL` debe usar el host `db` y la misma contraseña de `POSTGRES_PASSWORD`; nunca `localhost` desde el contenedor app.
@@ -84,11 +138,16 @@ El script transforma cada contraseña en un hash bcrypt con coste 12 y guarda es
 ## 3. Construir y ejecutar los tres contenedores
 
 ```bash
-docker compose up -d --build --wait --wait-timeout 180
+docker compose config --quiet
+docker compose config --services
+docker compose build app
+docker compose up -d --wait --wait-timeout 180
 docker compose ps
 curl -f http://localhost/health
 curl -f http://localhost/ready
 ```
+
+`config --quiet` valida el archivo sin imprimir variables privadas. `config --services` debe listar solo `proxy`, `app` y `db`. La construcción descarga las imágenes necesarias e instala las dependencias dentro de la imagen app.
 
 **Resultado esperado:** `proxy`, `app` y `db` en estado saludable. `/health` devuelve `{"status":"ok"}` y `/ready` devuelve `{"status":"ready"}`.
 
@@ -104,6 +163,36 @@ Deben aparecer mensajes como:
 Base de datos inicializada.
 Descubre el Perú escucha en el puerto 8080.
 ```
+
+### Consultar tablas y usuarios sin mostrar contraseñas
+
+Ejecuta dentro del contenedor PostgreSQL para no publicar su puerto:
+
+```bash
+docker compose exec -T db sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
+\dt
+\d users
+SELECT id, username, full_name, created_at,
+       password_hash LIKE '$2%' AS usa_bcrypt
+FROM users
+ORDER BY id;
+SQL
+```
+
+Deben aparecer `users` y `session`, los dos usuarios ficticios y `usa_bcrypt=true`. Esta consulta indica el prefijo del algoritmo; la verificación del hash con la contraseña real la realiza la suite de integración. No imprime hashes completos.
+
+### Comprobar puertos, red interna y volumen
+
+```bash
+docker compose exec -T app id
+DB_CONTAINER_ID=$(docker compose ps -q db)
+docker inspect "$DB_CONTAINER_ID" --format '{{json .NetworkSettings.Ports}}'
+DB_NETWORK_ID=$(docker inspect "$DB_CONTAINER_ID" --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}')
+docker network inspect "$DB_NETWORK_ID" --format 'red={{.Name}} interna={{.Internal}}'
+docker inspect "$DB_CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} -> {{.Destination}}{{end}}{{end}}'
+```
+
+**Resultado esperado:** app usa el usuario `node`, el puerto `5432/tcp` de DB no tiene binding al host, la red es interna y existe un volumen en `/var/lib/postgresql/data`. Se seleccionan solo esos campos de inspección para evitar exponer variables privadas.
 
 ### Arquitectura local
 
@@ -126,8 +215,13 @@ En la columna `PORTS` de Compose pueden aparecer `8080/tcp` y `5432/tcp`: eso de
 Realiza esta etapa con `COOKIE_SECURE=false`, `PROXY_SCHEME=http` y las dos contraseñas de seed todavía presentes en el entorno. Si ya cambiaste esos valores para HTTPS, restáuralos en `.env` y aplica la configuración:
 
 ```bash
+sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=false/; s/^PROXY_SCHEME=.*/PROXY_SCHEME=http/; s/^TRUST_PROXY=.*/TRUST_PROXY=172.30.10.2/' .env
 docker compose up -d --wait --force-recreate app proxy
+curl -sS -o /dev/null -w 'Login: HTTP %{http_code}\n' http://localhost/login
+curl -sS -o /dev/null -w 'Sin sesión: HTTP %{http_code} -> %{redirect_url}\n' http://localhost/welcome
 ```
+
+El login debe responder 200 y la bienvenida sin sesión, 302 hacia `/login`. No se guardan ni muestran cookies.
 
 ### 4.1. Integración sobre PostgreSQL real
 
@@ -169,10 +263,13 @@ PROXY_SCHEME=https
 TRUST_PROXY=172.30.10.2
 ```
 
-4. Recrea app y proxy para aplicar las variables:
+4. Puedes aplicar ese cambio y recrear app/proxy directamente desde la terminal:
 
 ```bash
+sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=true/; s/^PROXY_SCHEME=.*/PROXY_SCHEME=https/; s/^TRUST_PROXY=.*/TRUST_PROXY=172.30.10.2/' .env
 docker compose up -d --wait --force-recreate app proxy
+curl -f http://localhost/health
+curl -f http://localhost/ready
 ```
 
 5. Abre `/login` e inicia sesión con `demo_ana` y la contraseña que figura en `SEED_USER1_PASSWORD`. Debe aparecer **Bienvenido, Ana Torres**.
@@ -182,7 +279,32 @@ Nginx establece el esquema mediante `PROXY_SCHEME`; no utiliza para ello una cab
 
 Para volver a ejecutar smoke y persistencia, restaura `COOKIE_SECURE=false` y `PROXY_SCHEME=http` y recrea app/proxy. Los endpoints de salud pueden comprobarse por HTTP en ambos modos; el flujo de login debe probarse en el modo configurado.
 
-## 6. Crear el repositorio y publicar la imagen en Docker Hub
+## 6. Publicar el código en GitHub y la imagen en Docker Hub
+
+### 6.1. Guardar cambios en la rama dev
+
+Si modificaste archivos y tienes permiso sobre el repositorio remoto, revisa y publica los cambios. Con el directorio limpio, antes de comenzar a editar, puedes actualizar la rama así:
+
+```bash
+git status --short
+git switch dev
+git pull --ff-only origin dev
+```
+
+Después de editar, desde tu copia del proyecto:
+
+```bash
+git check-ignore .env
+git status --short
+git add README.md Dockerfile docker-compose.yml package.json package-lock.json .gitignore .dockerignore .env.example .devcontainer src db nginx scripts tests
+git diff --cached --stat
+git commit -m "Actualiza el proyecto Descubre el Perú"
+git push -u origin dev
+```
+
+Si no modificaste nada, omite el commit. No añadas `.env`. Si clonaste el repositorio original con otra cuenta, publica en tu fork, cuyo remoto puedes comprobar con `git remote -v`.
+
+### 6.2. Crear repositorio público y autenticar Docker
 
 Para publicar una copia propia necesitas un namespace de Docker Hub y un access token con permiso de escritura.
 
@@ -200,18 +322,33 @@ docker login --username "$DOCKERHUB_USERNAME"
 
 Introduce el access token únicamente en el prompt seguro de Docker. Para un repositorio nuevo puedes usar `1.0.0`; si esa etiqueta ya fue publicada para la entrega, usa una nueva, por ejemplo `1.0.1`. No sobrescribas una versión utilizada.
 
-5. Construye para `linux/amd64` y verifica la imagen:
+### 6.3. Construir y probar la imagen que se publicará
+
+Construye para `linux/amd64` con una etiqueta de registro y otra local que Compose pueda ejecutar:
 
 ```bash
+docker buildx version
 docker buildx build --platform linux/amd64 \
-  -t "$DOCKERHUB_USERNAME/descubre-peru:$APP_VERSION" --load .
+  -t "$DOCKERHUB_USERNAME/descubre-peru:$APP_VERSION" \
+  -t "descubre-peru:$APP_VERSION" --load .
 docker image inspect "$DOCKERHUB_USERNAME/descubre-peru:$APP_VERSION" \
   --format '{{.Os}}/{{.Architecture}} usuario={{.Config.User}}'
 ```
 
 **Resultado esperado:** `linux/amd64 usuario=node`. Los secretos se inyectan al ejecutar el contenedor; no son argumentos de construcción.
 
-6. Publica y comprueba el resultado remoto:
+Prueba esa misma imagen antes de subirla. Mantén las contraseñas originales de seed en el entorno local:
+
+```bash
+sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=false/; s/^PROXY_SCHEME=.*/PROXY_SCHEME=http/; s/^TRUST_PROXY=.*/TRUST_PROXY=172.30.10.2/' .env
+docker compose up -d --no-build --wait --force-recreate app proxy
+bash scripts/test-local.sh
+docker compose exec -T app npm run smoke
+```
+
+`APP_VERSION` sigue exportada en esta terminal y coincide con la etiqueta local creada por buildx. `--no-build` evita reconstruir una imagen diferente durante esta comprobación. Si vuelves a abrir otra terminal, define de nuevo el namespace y la versión antes de continuar. Al terminar puedes restaurar el modo HTTPS del paso 5 para navegar desde Codespaces.
+
+### 6.4. Publicar y verificar el registro
 
 ```bash
 docker push "$DOCKERHUB_USERNAME/descubre-peru:$APP_VERSION"
@@ -296,6 +433,29 @@ Desde la URL HTTPS de **Visit**, realiza estas comprobaciones:
 | Cerrar sesión e intentar abrir `/welcome` otra vez | Redirección a `/login` |
 | Abrir `/health` y `/ready` | Respuestas de salud y disponibilidad correctas |
 
+### Comprobar la URL pública desde la terminal
+
+Copia la URL real del botón **Visit**, comenzando por `https://`, sin credenciales:
+
+```bash
+read -r -p 'URL HTTPS de Blitz: ' CLOUD_URL
+CLOUD_URL=${CLOUD_URL%/}
+curl --fail --show-error "$CLOUD_URL/health"
+curl --fail --show-error "$CLOUD_URL/ready"
+curl -sS -o /dev/null -w 'Login: HTTP %{http_code}\n' "$CLOUD_URL/login"
+curl -sS -o /dev/null -w 'Sin sesión: HTTP %{http_code} -> %{redirect_url}\n' "$CLOUD_URL/welcome"
+```
+
+Espera salud y disponibilidad correctas, 200 en login y 302 hacia `/login` en bienvenida sin sesión. Estas consultas no verifican por sí solas un login válido.
+
+Si las dos contraseñas originales del entorno local coinciden con las utilizadas para crear los usuarios cloud, también puedes ejecutar el smoke test contra Blitz:
+
+```bash
+docker compose exec -T -e TEST_BASE_URL="$CLOUD_URL" app npm run smoke
+```
+
+Este comando solo realiza peticiones HTTP a la URL indicada; no ejecuta migraciones ni crea bases temporales en cloud. Necesita que las dos variables locales de contraseña sigan presentes. La suite `scripts/test-local.sh` debe seguir apuntando únicamente al PostgreSQL local.
+
 Los usuarios de login son los definidos en `scripts/init-db.js`; no son la cuenta de Blitz ni el usuario de conexión a PostgreSQL. Sus contraseñas corresponden a las variables usadas la primera vez que se insertaron en esa base.
 
 Después de verificar ambos usuarios:
@@ -304,6 +464,22 @@ Después de verificar ambos usuarios:
 2. En **Environment** de Blitz, cambia `SEED_ENABLED` a `false`.
 3. Retira `SEED_USER1_PASSWORD` y `SEED_USER2_PASSWORD`; conserva `DATABASE_URL`, `SESSION_SECRET` y las demás opciones de ejecución.
 4. Guarda, reinicia y comprueba que ambos usuarios siguen entrando. El login consulta los hashes almacenados en PostgreSQL y ya no depende de las variables de seed.
+
+Si también quieres desactivar el seed local después de las pruebas, sin retirar todavía los passwords que necesita el smoke test:
+
+```bash
+sed -i 's/^SEED_ENABLED=.*/SEED_ENABLED=false/' .env
+docker compose up -d --wait --force-recreate app
+```
+
+Para reactivarlo en una base nueva o insertar usuarios ausentes, conserva las dos contraseñas en `.env` y ejecuta:
+
+```bash
+sed -i 's/^SEED_ENABLED=.*/SEED_ENABLED=true/' .env
+docker compose up -d --wait --force-recreate app
+```
+
+Estos comandos actúan solo sobre el entorno local. Los cambios en Blitz se realizan en **Environment**, se guardan y se aplican con **Restart**. La creación de la app/base y la introducción de secretos en el panel siguen los pasos 7 y 8; no se ejecutan al modificar `.env` en Codespaces.
 
 La base local y la administrada son independientes: modificar `.env` en Codespaces no cambia Environment en Blitz, y viceversa. Si también retiras las contraseñas del entorno local, smoke y la prueba de persistencia necesitarán que las vuelvas a proporcionar de forma privada para verificar login.
 
@@ -323,13 +499,32 @@ Después de editar variables de `.env`, recrea app/proxy para inyectar los nuevo
 docker compose up -d --wait --force-recreate app proxy
 ```
 
-Para consultar estado, reiniciar el proceso sin cambiar configuración o detener el proyecto:
+Para consultar estado y logs:
 
 ```bash
 docker compose ps
 docker compose logs --tail=50 app
+docker compose logs --tail=50 proxy db
+```
+
+Para reiniciar el proceso sin cambiar configuración:
+
+```bash
 docker compose restart app
+```
+
+Para detener temporalmente y volver a iniciar conservando los contenedores:
+
+```bash
+docker compose stop
+docker compose start --wait
+```
+
+Para retirar los contenedores y redes y volver a crearlos conservando los datos:
+
+```bash
 docker compose down
+docker compose up -d --wait
 ```
 
 `docker compose down` conserva el volumen; al ejecutar `docker compose up -d --wait` se reutilizan los datos. **`docker compose down -v` destruye el volumen y los datos**: no lo uses en las pruebas ni antes de la exposición.
