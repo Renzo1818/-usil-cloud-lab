@@ -9,9 +9,9 @@ Esta guía incluye dos rutas: construir los archivos desde una carpeta vacía (s
 
 ## Arquitectura cloud y decisiones
 
-![Diagrama propio de la arquitectura cloud de Descubre el Perú en Blitz](assets/arquitectura-cloud-descubre-peru.png)
+![Vista profesional de la arquitectura cloud de Descubre el Perú en Blitz](assets/arquitectura-cloud-descubre-peru-profesional.png)
 
-El diagrama sigue la distribución del ejemplo académico y representa la solución desplegada en Blitz como una arquitectura lógica: entrada HTTPS de la plataforma, contenedor de aplicación y PostgreSQL administrado privado.
+El diagrama representa una vista lógica de despliegue organizada en consumidor, acceso, aplicación y datos. Distingue los límites de plataforma, el tráfico de solicitudes y respuestas, y la descarga de imágenes durante el despliegue. La entrada HTTPS de Blitz y PostgreSQL son servicios administrados; la aplicación es el contenedor propio.
 
 - **Entrada HTTPS gestionada:** Blitz cifra el acceso del navegador y dirige las solicitudes hacia la aplicación, que escucha internamente en el puerto 8080.
 - **Imagen propia versionada:** Docker Hub distribuye `renzo1818/descubre-peru:1.0.0` para `linux/amd64`. La descarga ocurre durante el despliegue y no forma parte de cada petición del usuario.
@@ -23,6 +23,36 @@ El contenedor propio de este despliegue es la aplicación. La entrada HTTPS y Po
 
 <details>
 <summary>Prompts utilizados para generar la arquitectura cloud</summary>
+
+Rediseño profesional con la herramienta integrada de imágenes, tomando la versión cloud anterior como objetivo de edición:
+
+```text
+Rediseña la imagen de referencia como un diagrama profesional elaborado por un arquitecto de TI para una revisión de arquitectura empresarial. La imagen adjunta es el OBJETIVO DE EDICIÓN: conserva su arquitectura y datos técnicos, pero reemplaza por completo el estilo de infografía escolar por una vista de despliegue precisa, sobria y elegante. Formato horizontal amplio, aproximadamente 16:9, alta resolución, fondo blanco puro, retícula consistente, abundante espacio en blanco, tipografía sans serif moderna y muy legible, títulos de tamaño contenido. Cajas blancas con bordes finos gris azulado, un acento azul petróleo y acento verde azulado para datos; sin degradados, sombras, grandes bloques rellenos oscuros, ornamentación, iconos 3D ni logotipos de proveedores ajenos. Iconos lineales discretos y coherentes. Todos los textos en español.
+
+Encabezado exacto: "Descubre el Perú | Arquitectura cloud".
+Subtítulo exacto: "Vista lógica de despliegue · Producción en Blitz Cloud".
+
+Usa una disposición clara de izquierda a derecha. Usuario fuera de la plataforma a la izquierda, y un gran límite lógico fino discontinuo que encierra los servicios de Blitz, rotulado discretamente "Blitz Cloud · servicios de plataforma". Encima de la fila principal indica las capas: "Consumidor", "Acceso", "Aplicación", "Datos", alineadas con sus componentes.
+
+Componente externo: "Usuario" y "Navegador web", con icono lineal de usuario o navegador.
+Dentro de Blitz, tres componentes principales alineados:
+1) "Entrada HTTPS", etiqueta pequeña "Servicio gestionado", detalle "Terminación TLS y certificado".
+2) "Aplicación web", etiqueta pequeña "Contenedor propio", detalle "Node.js · Express · EJS", "Login, sesiones y bienvenida" y "Puerto interno: 8080".
+3) "PostgreSQL 17", etiqueta pequeña "Base de datos administrada", detalle "Usuarios y sesiones", "Acceso privado" y "Persistencia gestionada". Usa un pequeño icono de base de datos junto al título, evitando un segundo cilindro de almacenamiento redundante.
+
+Un límite lógico interno muy sutil, con título "Comunicación privada", engloba aplicación y PostgreSQL. No representa subredes específicas ni topología física interna del proveedor.
+
+Conecta en una única fila: Usuario → Entrada HTTPS → Aplicación → PostgreSQL. Flechas continuas finas, unidireccionales hacia la derecha; indican flujo de solicitudes y dependencia, las respuestas recorren el sentido inverso. Etiqueta usuario→entrada "HTTPS / TCP 443"; entrada→app "HTTP / TCP 8080"; app→DB "PostgreSQL / TCP 5432", con segunda línea discreta "DATABASE_URL". Etiquetas fuera de las flechas, sin superposiciones.
+
+Debajo de la fila principal, en una banda de despliegue separada, coloca el componente externo "Docker Hub", etiqueta "Registro de imágenes", referencia EXACTA "renzo1818/descubre-peru:1.0.0" y "linux/amd64". Conecta Docker Hub → Aplicación mediante una flecha discontinua gris etiquetada "Descarga de imagen durante el despliegue". El trazado debe llegar al contenedor de aplicación desde abajo, sin cruzarse con el tráfico de solicitudes ni con textos.
+
+Al pie, una pequeña leyenda técnica: línea continua = "Tráfico de aplicación"; línea discontinua = "Despliegue de imagen"; borde discontinuo = "Límite lógico". Otra línea discreta de controles: "bcrypt · SQL parametrizado · Sesiones en PostgreSQL · Secretos por variables de entorno".
+Nota inferior breve: "Esquema al arrancar; usuarios de prueba solo con SEED_ENABLED=true."
+
+Prioriza jerarquía de información, alineación rigurosa, calidad tipográfica y conectores limpios, como una lámina profesional de arquitectura de solución. No incluyas tarjetas promocionales ni eslóganes. Mantén los servicios reales: Blitz gestiona HTTPS y PostgreSQL; únicamente la aplicación es un contenedor propio. No dibujar Nginx propio, Docker Compose, un volumen Docker local, AWS, Azure, Kubernetes, balanceadores adicionales, CI/CD automático, réplicas o escalado no implementados. No mostrar secretos ni URLs inventadas.
+```
+
+La versión anterior utilizó los siguientes prompts:
 
 Generación con la herramienta integrada de imágenes. La imagen del ejemplo del usuario se utilizó como referencia de composición.
 
