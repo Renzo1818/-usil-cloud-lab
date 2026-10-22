@@ -2,10 +2,911 @@
 
 Aplicación de turismo del Perú con login contra PostgreSQL, saludo personalizado y bienvenida protegida. Presenta Machu Picchu, lago Titicaca, líneas de Nasca, Arequipa, Paracas e Iquitos con recursos CSS locales.
 
-Esta guía permite replicar el proyecto desde GitHub Codespaces, comprobar los tres contenedores y publicar una instancia propia en Blitz Cloud. Ejecuta los comandos desde la raíz del repositorio, en el orden indicado.
+Esta guía incluye dos rutas: construir los archivos desde una carpeta vacía (sección 0) u obtener el proyecto existente (sección 1). Ambas continúan con configuración, tres contenedores, pruebas y publicación en Docker Hub y Blitz. Ejecuta los comandos Bash desde la raíz del proyecto indicado en cada etapa.
 
 - Código completo: [rama dev](https://github.com/Renzo1818/-usil-cloud-lab/tree/dev).
 - Imagen de referencia: [renzo1818/descubre-peru:1.0.0](https://hub.docker.com/r/renzo1818/descubre-peru).
+
+## 0. Construir desde una carpeta vacía
+
+Esta ruta crea los archivos de la aplicación sin clonar el proyecto. Si quieres ejecutar el código existente, utiliza la ruta de clonación de la sección 1. Después de completar esta sección, continúa en la sección 2; no vuelvas a clonar sobre el proyecto recién creado.
+
+Usa una terminal **Bash en Linux**, con Node.js 24, npm, Git, Docker y Docker Compose disponibles. Para la actividad, puedes hacer la creación en una terminal de Codespaces que ya tenga esas herramientas. Los comandos construyen una aplicación nueva dentro de `descubre-peru`; esa carpeta no debe existir previamente. Si falla su creación, detente y elige una ubicación libre antes de continuar.
+
+Los bloques siguientes contienen el código de esta implementación. Cópialos completos y en orden, usando la misma terminal. No incluyen `.env` ni secretos; el archivo privado se genera en la sección 2. Al cambiar la implementación, estos bloques también deberán actualizarse.
+
+### 0.1. Comprobar las herramientas
+
+```bash
+bash --version
+git --version
+node --version
+npm --version
+docker version
+docker compose version
+docker buildx version
+```
+
+Docker debe mostrar cliente y servidor. Esta ruta presupone el entorno de desarrollo preparado, no una instalación de Linux sin herramientas. La configuración de Codespaces que se crea abajo se aplicará al abrir un Codespace del nuevo repositorio o al reconstruir su contenedor de desarrollo.
+
+### 0.2. Crear directorios, Git, package.json y lockfile
+
+```bash
+mkdir descubre-peru || exit 1
+cd descubre-peru || exit 1
+git init -b dev
+mkdir -p .devcontainer src/views src/public db/migrations nginx scripts tests
+npm init -y
+npm pkg set name=descubre-peru version=1.0.0 type=module 'engines.node=>=24 <25'
+npm pkg set private=true --json
+npm pkg delete main description keywords author license directories
+npm pkg set \
+  'scripts.start=node scripts/init-db.js && node src/server.js' \
+  'scripts.init-db=node scripts/init-db.js' \
+  'scripts.generate-env=node scripts/generate-env.js' \
+  'scripts.test=node tests/config.test.js && node tests/auth.test.js' \
+  'scripts.smoke=node scripts/smoke-test.js' \
+  'scripts.verify-persistence=bash scripts/verify-persistence.sh'
+npm install --save-exact --no-audit --no-fund \
+  express@5.3.0 ejs@7.0.2 pg@8.23.1 bcrypt@6.0.0 \
+  express-session@1.19.0 connect-pg-simple@10.0.0 \
+  helmet@8.3.0 express-rate-limit@8.7.1
+```
+
+`npm init` crea el manifiesto; `npm pkg set` configura módulos ES, scripts y el indicador privado como booleano. `npm install --save-exact` fija las dependencias directas y genera `package-lock.json`, necesario para `npm ci` en Docker. El lockfile se genera a partir del registro vigente: consérvalo en Git para repetir exactamente esa instalación; no se garantiza que sus dependencias transitivas coincidan con las de un lockfile generado en otra fecha.
+
+### 0.3. Crear exclusiones, variables de ejemplo y contenedores
+
+```bash
+cat > .gitignore <<'ARCHIVO_PERU_1'
+/context.md
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+*.log
+*.cookies
+playwright-report/
+test-results/
+.tmp/
+ARCHIVO_PERU_1
+
+cat > .dockerignore <<'ARCHIVO_PERU_2'
+.git
+.agents
+.codex
+.aws
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+*.log
+*.cookies
+tests
+README.md
+context.md
+index.html
+.tmp
+test-results
+playwright-report
+ARCHIVO_PERU_2
+
+cat > .env.example <<'ARCHIVO_PERU_3'
+NODE_ENV=production
+PORT=8080
+POSTGRES_DB=turismo
+POSTGRES_USER=turismo
+POSTGRES_PASSWORD=REEMPLAZAR
+DATABASE_URL=postgresql://turismo:REEMPLAZAR@db:5432/turismo
+SESSION_SECRET=REEMPLAZAR_POR_SECRETO_ALEATORIO
+COOKIE_SECURE=false
+PROXY_SCHEME=http
+TRUST_PROXY=172.30.10.2
+SEED_ENABLED=true
+SEED_USER1_PASSWORD=REEMPLAZAR
+SEED_USER2_PASSWORD=REEMPLAZAR
+DOCKERHUB_USERNAME=
+APP_VERSION=1.0.0
+ARCHIVO_PERU_3
+
+cat > .devcontainer/devcontainer.json <<'ARCHIVO_PERU_4'
+{
+  "name": "Descubre el Perú",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" }
+  },
+  "forwardPorts": [80],
+  "portsAttributes": {
+    "80": { "label": "Descubre el Perú", "onAutoForward": "notify", "visibility": "private" }
+  }
+}
+ARCHIVO_PERU_4
+
+cat > Dockerfile <<'ARCHIVO_PERU_5'
+FROM node:24.21.0-bookworm-slim
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY --chown=node:node src ./src
+COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node db ./db
+USER node
+EXPOSE 8080
+CMD ["sh", "scripts/start.sh"]
+ARCHIVO_PERU_5
+
+cat > docker-compose.yml <<'ARCHIVO_PERU_6'
+services:
+  proxy:
+    image: nginx:1.28.0-alpine
+    ports:
+      - "80:80"
+    environment:
+      PROXY_SCHEME: ${PROXY_SCHEME:-http}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      front:
+        ipv4_address: 172.30.10.2
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  app:
+    image: descubre-peru:${APP_VERSION:-1.0.0}
+    platform: linux/amd64
+    build: .
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL:?Genera .env antes de iniciar}
+      SESSION_SECRET: ${SESSION_SECRET:?Genera .env antes de iniciar}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-172.30.10.2}
+      SEED_ENABLED: ${SEED_ENABLED:-false}
+      SEED_USER1_PASSWORD: ${SEED_USER1_PASSWORD:-}
+      SEED_USER2_PASSWORD: ${SEED_USER2_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      front:
+        ipv4_address: 172.30.10.3
+      back: {}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 6s
+      retries: 10
+      start_period: 30s
+    init: true
+    restart: unless-stopped
+  db:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Genera .env antes de iniciar}
+      POSTGRES_USER: ${POSTGRES_USER:?Genera .env antes de iniciar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Genera .env antes de iniciar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - back
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+networks:
+  front:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+  back:
+    internal: true
+volumes:
+  postgres_data:
+ARCHIVO_PERU_6
+
+cat > nginx/default.conf.template <<'ARCHIVO_PERU_7'
+server {
+    listen 80;
+    server_tokens off;
+    client_max_body_size 8k;
+    location / {
+        proxy_pass http://app:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto ${PROXY_SCHEME};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 15s;
+    }
+}
+ARCHIVO_PERU_7
+
+cat > db/migrations/001_init.sql <<'ARCHIVO_PERU_8'
+CREATE TABLE IF NOT EXISTS users (
+  id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  username varchar(64) UNIQUE NOT NULL,
+  password_hash text NOT NULL,
+  full_name varchar(120) NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS session (
+  sid varchar PRIMARY KEY,
+  sess json NOT NULL,
+  expire timestamp(6) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_expire_idx ON session (expire);
+ARCHIVO_PERU_8
+```
+
+### 0.4. Crear la aplicación, las vistas y el diseño
+
+```bash
+cat > src/config.js <<'ARCHIVO_PERU_1'
+export function readConfig(env = process.env) {
+  const required = name => {
+    if (!env[name]) throw new Error(`Falta la variable ${name}.`);
+    return env[name];
+  };
+  const bool = (name, fallback = 'false') => {
+    const value = env[name] ?? fallback;
+    if (!['true', 'false'].includes(value)) throw new Error(`${name} debe ser true o false.`);
+    return value === 'true';
+  };
+  const databaseUrl = required('DATABASE_URL');
+  try {
+    const parsed = new URL(databaseUrl);
+    if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) throw new Error();
+  } catch { throw new Error('DATABASE_URL debe ser una URL PostgreSQL válida.'); }
+  const sessionSecret = required('SESSION_SECRET');
+  if (Buffer.byteLength(sessionSecret) < 32) throw new Error('SESSION_SECRET requiere al menos 32 bytes.');
+  const port = Number(env.PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT inválido.');
+  const proxy = env.TRUST_PROXY ?? 'false';
+  // Solo direcciones/subredes explícitas; nunca confiar en un número arbitrario de saltos.
+  const parts = proxy.split(',').map(v => v.trim());
+  const { isIP } = process.getBuiltinModule('node:net');
+  const valid = value => {
+    if (value === 'loopback') return true;
+    const [ip, mask, extra] = value.split('/');
+    const family = isIP(ip);
+    return !extra && family && (mask === undefined || (/^\d+$/.test(mask) && Number(mask) > 0 && Number(mask) <= (family === 4 ? 32 : 128)));
+  };
+  if (proxy !== 'false' && !parts.every(valid)) throw new Error('TRUST_PROXY requiere false, loopback o IP/CIDR explícitas.');
+  const seed = bool('SEED_ENABLED');
+  const seedPasswords = seed ? [required('SEED_USER1_PASSWORD'), required('SEED_USER2_PASSWORD')] : [];
+  if (seedPasswords.some(p => Buffer.byteLength(p) < 12 || Buffer.byteLength(p) > 72)) {
+    throw new Error('Los passwords de seed requieren entre 12 y 72 bytes.');
+  }
+  return { databaseUrl, sessionSecret, port, secure: bool('COOKIE_SECURE'),
+    trustProxy: proxy === 'false' ? false : parts, seed, seedPasswords };
+}
+ARCHIVO_PERU_1
+
+cat > src/db.js <<'ARCHIVO_PERU_2'
+import pg from 'pg';
+export function createPool(connectionString) {
+  const pool = new pg.Pool({ connectionString, max: 5, connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000 });
+  pool.on('error', () => console.error('Conexión inactiva a PostgreSQL interrumpida.'));
+  return pool;
+}
+ARCHIVO_PERU_2
+
+cat > src/app.js <<'ARCHIVO_PERU_3'
+import express from 'express';
+import session from 'express-session';
+import connectPgSimple from 'connect-pg-simple';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
+import bcrypt from 'bcrypt';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const destinations = [
+  { name: 'Machu Picchu', region: 'Cusco · Sierra', style: 'andes', icon: '◭', text: 'Terrazas de piedra y montañas que guardan la memoria de los incas.' },
+  { name: 'Lago Titicaca', region: 'Puno · Sierra', style: 'lago', icon: '≈', text: 'Un horizonte de agua y tradiciones vivas en el altiplano peruano.' },
+  { name: 'Líneas de Nasca', region: 'Ica · Costa', style: 'desierto', icon: '✳', text: 'Trazos ancestrales que convierten el desierto en un paisaje de preguntas.' },
+  { name: 'Arequipa', region: 'Arequipa · Sierra', style: 'ciudad', icon: '⌂', text: 'Arquitectura de sillar, sabores propios y volcanes en el horizonte.' },
+  { name: 'Paracas', region: 'Ica · Costa', style: 'mar', icon: '∿', text: 'El encuentro del desierto con el Pacífico: acantilados, playas y vida marina.' },
+  { name: 'Iquitos', region: 'Loreto · Selva', style: 'selva', icon: '❋', text: 'Una puerta a los ríos, los bosques y la diversidad de la Amazonía.' }
+];
+export async function createApp(config, pool) {
+  const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', config.trustProxy);
+  let reportedProxy = false;
+  app.use((req, _res, next) => {
+    if (config.secure && config.trustProxy === false && !reportedProxy && req.headers['x-forwarded-proto'] === 'https') {
+      console.info(`Entrada HTTPS observada desde ${req.socket.remoteAddress}. Verifica esta dirección del proxy antes de configurar TRUST_PROXY.`);
+      reportedProxy = true;
+    }
+    next();
+  });
+  app.set('view engine', 'ejs');
+  app.set('views', fileURLToPath(new URL('./views', import.meta.url)));
+  app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': config.secure ? [] : null } } }));
+  app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  app.get('/ready', async (_req, res) => {
+    try { await pool.query('SELECT 1'); res.json({ status: 'ready' }); }
+    catch { res.status(503).json({ status: 'unavailable' }); }
+  });
+  app.use('/assets', express.static(fileURLToPath(new URL('./public', import.meta.url)), { maxAge: '1h' }));
+  app.use(express.urlencoded({ extended: false, limit: '4kb', parameterLimit: 10 }));
+  const Store = connectPgSimple(session);
+  app.use(session({
+    name: 'peru.sid', secret: config.sessionSecret,
+    store: new Store({ pool, tableName: 'session', createTableIfMissing: false,
+      errorLog: () => console.error('Error del almacén de sesiones.') }),
+    resave: false, saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'lax', secure: config.secure, maxAge: 30 * 60 * 1000 }
+  }));
+  app.use((req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    req.session.csrf ??= randomBytes(32).toString('hex');
+    res.locals.csrf = req.session.csrf;
+    next();
+  });
+  app.use((req, res, next) => {
+    if (req.method !== 'POST') return next();
+    const supplied = req.body?._csrf;
+    const expected = req.session.csrf;
+    if (typeof supplied !== 'string' || !/^[a-f0-9]{64}$/.test(supplied) || supplied.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+      return res.status(403).send('Solicitud no válida. Recarga el formulario e inténtalo nuevamente.');
+    }
+    next();
+  });
+  const dummyHash = await bcrypt.hash(randomBytes(32).toString('hex'), 12);
+  const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10,
+    standardHeaders: 'draft-8', legacyHeaders: false,
+    message: 'Demasiados intentos. Vuelve a intentarlo en 15 minutos.' });
+  app.get('/', (req, res) => res.redirect(req.session.userId ? '/welcome' : '/login'));
+  app.get('/login', (req, res) => {
+    if (req.session.userId) return res.redirect('/welcome');
+    res.render('login', { error: null });
+  });
+  app.post('/login', loginLimit, async (req, res) => {
+    const { username, password } = req.body;
+    const fail = () => res.status(401).render('login', { error: 'Usuario o contraseña incorrectos' });
+    if (typeof username !== 'string' || typeof password !== 'string' ||
+      username.trim().length < 1 || username.length > 64 || password.length < 1 || Buffer.byteLength(password) > 72) return fail();
+    const result = await pool.query('SELECT id, password_hash FROM users WHERE username = $1', [username.trim()]);
+    const user = result.rows[0];
+    const valid = await bcrypt.compare(password, user?.password_hash ?? dummyHash);
+    if (!valid || !user) return fail();
+    await new Promise((resolve, reject) => req.session.regenerate(error => error ? reject(error) : resolve()));
+    req.session.userId = user.id;
+    req.session.csrf = randomBytes(32).toString('hex');
+    await new Promise((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));
+    res.redirect('/welcome');
+  });
+  app.get('/welcome', async (req, res) => {
+    if (!req.session.userId) return res.redirect('/login');
+    const result = await pool.query('SELECT full_name FROM users WHERE id = $1', [req.session.userId]);
+    if (!result.rowCount) return req.session.destroy(() => res.redirect('/login'));
+    res.render('welcome', { name: result.rows[0].full_name, destinations });
+  });
+  app.post('/logout', (req, res, next) => {
+    req.session.destroy(error => {
+      if (error) return next(error);
+      res.clearCookie('peru.sid', { path: '/', httpOnly: true, sameSite: 'lax', secure: config.secure });
+      res.redirect('/login');
+    });
+  });
+  app.use((_req, res) => res.status(404).send('Página no encontrada.'));
+  app.use((error, _req, res, _next) => {
+    const badInput = error.status === 400 || error.status === 413;
+    if (!badInput) console.error('No se pudo completar una solicitud.');
+    res.status(badInput ? error.status : 503).send(badInput ? 'Formulario no válido.' : 'Servicio temporalmente no disponible. Inténtalo nuevamente.');
+  });
+  return app;
+}
+ARCHIVO_PERU_3
+
+cat > src/server.js <<'ARCHIVO_PERU_4'
+import { readConfig } from './config.js';
+import { createPool } from './db.js';
+import { createApp } from './app.js';
+let pool;
+try {
+  const config = readConfig();
+  pool = createPool(config.databaseUrl);
+  const app = await createApp(config, pool);
+  const server = app.listen(config.port, '0.0.0.0', () => console.log(`Descubre el Perú escucha en el puerto ${config.port}.`));
+  server.on('error', async () => { console.error('No se pudo abrir el puerto de la aplicación.'); await pool.end(); process.exitCode = 1; });
+  const shutdown = () => {
+    const timeout = setTimeout(() => process.exit(1), 10000).unref();
+    server.close(async () => { await pool.end(); clearTimeout(timeout); process.exit(0); });
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+} catch (error) {
+  console.error(error.message);
+  if (pool) await pool.end();
+  process.exitCode = 1;
+}
+ARCHIVO_PERU_4
+
+cat > src/views/login.ejs <<'ARCHIVO_PERU_5'
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#a63d2f"><title>Descubre el Perú · Iniciar sesión</title><link rel="stylesheet" href="/assets/styles.css"></head>
+<body class="login-page">
+<a class="skip" href="#contenido">Ir al contenido</a>
+<header class="site-header"><a class="brand" href="/">PERÚ<span>un viaje que se queda contigo</span></a><span class="header-note">COSTA · SIERRA · SELVA</span></header>
+<main id="contenido" class="login-layout">
+<section class="intro"><p class="eyebrow">MIL PAISAJES. UN SOLO PAÍS.</p><h1>Descubre<br>el <em>Perú.</em></h1><p class="lead">Entre el Pacífico, los Andes y la Amazonía, tu próxima historia está por comenzar.</p>
+<div class="landscape" role="img" aria-label="Ilustración de montañas andinas, sol y río"><span class="sun"></span><span class="mountain far"></span><span class="mountain near"></span><span class="river"></span><span class="landscape-label">UN TERRITORIO DE ENCUENTROS</span></div>
+<div class="region-labels"><span>01 / Costa</span><span>02 / Sierra</span><span>03 / Selva</span></div>
+</section>
+<section class="login-card" aria-labelledby="login-title"><p class="eyebrow">TU VIAJE EMPIEZA AQUÍ</p><h2 id="login-title">Un país por explorar</h2><p>Inicia sesión para descubrir destinos que inspiran.</p>
+<% if (error) { %><p class="error" role="alert"><%= error %></p><% } %>
+<form action="/login" method="post"><input type="hidden" name="_csrf" value="<%= csrf %>">
+<label for="username">Usuario</label><input id="username" name="username" autocomplete="username" maxlength="64" required placeholder="Tu usuario">
+<label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="72" required placeholder="Tu contraseña">
+<button type="submit">Comenzar a explorar <span aria-hidden="true">↗</span></button>
+</form><p class="form-note">Acceso para usuarios de demostración.<br>Un recorrido por la diversidad del Perú.</p></section>
+</main><footer>Hecho para explorar, aprender y conectar.<span>PERÚ · TURISMO Y CULTURA</span></footer>
+</body></html>
+ARCHIVO_PERU_5
+
+cat > src/views/welcome.ejs <<'ARCHIVO_PERU_6'
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#a63d2f"><title>Explora destinos · Descubre el Perú</title><link rel="stylesheet" href="/assets/styles.css"></head>
+<body><a class="skip" href="#contenido">Ir al contenido</a>
+<header class="site-header"><a class="brand" href="/">PERÚ<span>un viaje que se queda contigo</span></a><form action="/logout" method="post"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="logout" type="submit">Cerrar sesión <span aria-hidden="true">↗</span></button></form></header>
+<main id="contenido" class="explore"><section class="welcome-intro"><p class="eyebrow">EL VIAJE ES TUYO</p><h1>Bienvenido, <%= name %></h1><p class="lead">Seis destinos, infinitas formas de sentir el Perú.</p><div class="region-pills"><span>Costa</span><span>Sierra</span><span>Selva</span></div></section>
+<section aria-labelledby="destinos-title"><div class="section-heading"><h2 id="destinos-title">Lugares que dejan huella</h2><span>UNA MIRADA AL PERÚ / 01—06</span></div>
+<div class="destinations"><% destinations.forEach((destination, index) => { %>
+<article class="destination"><div class="destination-art <%= destination.style %>" aria-hidden="true"><span class="art-number">0<%= index + 1 %></span><span class="art-icon"><%= destination.icon %></span><span class="art-caption"><%= destination.name %></span></div><div class="destination-body"><p class="eyebrow"><%= destination.region %></p><h3><%= destination.name %></h3><p><%= destination.text %></p></div></article>
+<% }); %></div></section><aside class="travel-note"><span aria-hidden="true">✳</span><div><h2>Viaja con respeto</h2><p>Cuida los paisajes, valora las comunidades y lleva contigo solo recuerdos.</p></div></aside></main>
+<footer>Hecho para explorar, aprender y conectar.<span>PERÚ · TURISMO Y CULTURA</span></footer>
+</body></html>
+ARCHIVO_PERU_6
+
+cat > src/public/styles.css <<'ARCHIVO_PERU_7'
+:root{--paper:#f7f2e9;--ink:#283c32;--muted:#5d665c;--red:#a63d2f;--line:#d8d3c7;--serif:Georgia,'Times New Roman',serif}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}a{color:inherit}button,input{font:inherit}:focus-visible{outline:3px solid #146b86;outline-offset:4px}.skip{position:absolute;left:16px;top:-100px;z-index:5;background:white;padding:12px}.skip:focus{top:12px}.site-header{max-width:1440px;margin:auto;padding:28px 6%;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:20px}.brand{font-size:32px;font-weight:900;letter-spacing:-2px;text-decoration:none;color:var(--red);line-height:1}.brand span{display:block;font-size:10px;letter-spacing:1px;font-weight:500;margin-top:9px;color:var(--ink)}.header-note,.eyebrow{font-size:11px;font-weight:700;letter-spacing:2px}.header-note{color:var(--muted)}.login-layout{max-width:1240px;margin:64px auto 72px;display:grid;grid-template-columns:1.2fr 1fr;gap:100px;padding:0 40px;align-items:center}.eyebrow{color:var(--red);margin:0 0 18px}h1,h2,h3,p{overflow-wrap:anywhere}h1{font-family:var(--serif);font-size:clamp(56px,7vw,94px);line-height:1.02;font-weight:400;letter-spacing:-3px;margin:20px 0 24px}h1 em{color:var(--red);font-weight:400}.lead{font-size:17px;max-width:450px;color:var(--muted);line-height:1.8}.landscape{height:210px;position:relative;overflow:hidden;border-radius:110px 110px 4px 4px;background:#e8cfa9;margin-top:34px}.sun{position:absolute;width:75px;height:75px;border-radius:50%;background:#bd583b;left:64%;top:22px}.mountain{position:absolute;width:110%;height:230px;clip-path:polygon(0 100%,25% 10%,39% 47%,57% 0,100% 100%)}.far{background:#65816f;top:35px;left:-40px}.near{background:#2c5146;top:90px;left:20px;transform:scaleX(-1)}.river{position:absolute;width:240px;height:160px;border:24px solid #a5beb2;border-radius:50%;transform:rotate(-25deg);bottom:-136px;left:25%}.landscape-label{position:absolute;bottom:15px;left:22px;color:#fff8e7;font-size:9px;letter-spacing:2px}.region-labels{display:flex;justify-content:space-between;margin-top:14px;font-size:11px;letter-spacing:1px;color:var(--muted)}.login-card{background:#fffdf8;padding:42px;border:1px solid var(--line);border-radius:8px;box-shadow:0 15px 45px #38322308}.login-card h2{font-family:var(--serif);font-size:33px;font-weight:400;line-height:1.2;margin:0 0 14px}.login-card>p:not(.eyebrow){color:var(--muted);font-size:14px}.login-card form{margin-top:28px}label{display:block;font-size:13px;font-weight:650;margin:18px 0 7px}input:not([type=hidden]){width:100%;padding:13px 14px;border:1px solid #b6bcaf;border-radius:4px;background:#fffdf8;color:var(--ink)}input::placeholder{color:#73786e;font-size:14px}button{cursor:pointer;background:var(--red);color:white;border:1px solid var(--red);padding:13px 19px;border-radius:4px;font-size:14px;font-weight:650;transition:background .15s}button:hover{background:#873024}.login-card button{width:100%;display:flex;justify-content:space-between;margin-top:28px}.form-note{font-size:11px!important;text-align:center;border-top:1px solid var(--line);padding-top:24px;margin-top:28px!important}.error{padding:12px;background:#fce9e4;color:#8e281b!important;border-left:3px solid var(--red)}footer{border-top:1px solid var(--line);max-width:1440px;margin:auto;padding:24px 6%;display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:11px}footer span{letter-spacing:1.5px}.logout{background:transparent;color:var(--ink);border-color:var(--line)}.logout:hover{background:#e8e2d5}.explore{max-width:1240px;margin:auto;padding:50px 40px}.welcome-intro{position:relative;margin-bottom:56px}.welcome-intro h1{font-size:clamp(38px,5vw,64px);letter-spacing:-1.5px;max-width:950px}.region-pills{display:flex;gap:10px;margin-top:24px}.region-pills span{border:1px solid #c7cabc;border-radius:40px;padding:4px 18px;font-size:12px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;border-top:1px solid var(--line);padding:22px 0}.section-heading h2{font:400 28px var(--serif);margin:0}.section-heading>span{font-size:10px;letter-spacing:1px;color:var(--muted)}.destinations{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}.destination{background:#fffdf8;border:1px solid var(--line);border-radius:6px;overflow:hidden}.destination-art{height:190px;position:relative;overflow:hidden;color:#fff7e8;background:#526e58}.destination-art:after{content:'';position:absolute;inset:35% -20% -60%;background:#ffffff18;transform:rotate(-25deg);border:1px solid #ffffff50;border-radius:40%}.art-number{position:absolute;top:14px;left:18px;font-size:11px;letter-spacing:1px}.art-icon{position:absolute;right:24px;top:-30px;font:180px var(--serif);line-height:1.4;color:#ffffff45}.art-caption{position:absolute;bottom:16px;left:18px;font:italic 22px var(--serif)}.lago{background:#356775}.desierto{background:#a85e3c}.ciudad{background:#8a7358}.mar{background:#3b777a}.selva{background:#365e40}.destination-body{padding:24px}.destination-body .eyebrow{font-size:9px;margin-bottom:9px}.destination h3{font:400 26px var(--serif);margin:0 0 12px}.destination-body>p:last-child{font-size:14px;color:var(--muted);margin:0}.travel-note{margin-top:40px;padding:26px;background:#e7eadf;display:flex;gap:25px;align-items:center;border-radius:5px}.travel-note>span{font-size:42px;color:var(--red)}.travel-note h2{font:400 24px var(--serif);margin:0 0 5px}.travel-note p{margin:0;font-size:14px;color:var(--muted)}@media(max-width:1000px){.login-layout{gap:40px}.login-card{padding:30px}.destinations{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.site-header{padding:23px 6%}.header-note{font-size:9px;letter-spacing:1px;text-align:right}.brand{font-size:27px}.brand span{font-size:8px}.login-layout{grid-template-columns:1fr;margin:32px auto 40px;padding:0 6%;gap:30px}.intro h1{font-size:64px}.landscape{height:150px;margin-top:22px}.region-labels{margin-bottom:5px}.login-card{padding:28px}.explore{padding:32px 6%}.welcome-intro{margin-bottom:35px}.destinations{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column;gap:10px}.section-heading h2{font-size:25px}footer{flex-direction:column;gap:6px}.logout{font-size:12px;padding:10px}.travel-note{padding:20px;gap:16px}}
+ARCHIVO_PERU_7
+```
+
+### 0.5. Crear scripts de inicialización, arranque y comprobación
+
+```bash
+cat > scripts/generate-env.js <<'ARCHIVO_PERU_1'
+import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+const secret = () => randomBytes(32).toString('hex');
+const password = secret();
+const content = `NODE_ENV=production
+PORT=8080
+POSTGRES_DB=turismo
+POSTGRES_USER=turismo
+POSTGRES_PASSWORD=${password}
+DATABASE_URL=postgresql://turismo:${password}@db:5432/turismo
+SESSION_SECRET=${secret()}
+COOKIE_SECURE=false
+PROXY_SCHEME=http
+TRUST_PROXY=172.30.10.2
+SEED_ENABLED=true
+SEED_USER1_PASSWORD=${secret()}
+SEED_USER2_PASSWORD=${secret()}
+DOCKERHUB_USERNAME=
+APP_VERSION=1.0.0
+`;
+try {
+  writeFileSync('.env', content, { flag: 'wx', mode: 0o600 });
+  console.log('.env creado. Consulta sus valores únicamente desde tu terminal privada.');
+} catch (error) {
+  console.error(error.code === 'EEXIST' ? '.env ya existe: no se modificó.' : 'No se pudo crear .env.');
+  process.exitCode = 1;
+}
+ARCHIVO_PERU_1
+
+cat > scripts/init-db.js <<'ARCHIVO_PERU_2'
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import bcrypt from 'bcrypt';
+import { readConfig } from '../src/config.js';
+import { createPool } from '../src/db.js';
+export async function initialize(pool, config) {
+  let client;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    try { client = await pool.connect(); break; }
+    catch {
+      if (attempt === 14) throw new Error('PostgreSQL no disponible tras los reintentos.');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL lock_timeout = '15s'");
+    await client.query('SELECT pg_advisory_xact_lock(739120)');
+    await client.query(await readFile(new URL('../db/migrations/001_init.sql', import.meta.url), 'utf8'));
+    if (config.seed) {
+      const users = [['demo_ana', 'Ana Torres'], ['demo_luis', 'Luis Ramos']];
+      for (const [i, [username, name]] of users.entries()) {
+        const exists = await client.query('SELECT id FROM users WHERE username = $1', [username]);
+        if (!exists.rowCount) {
+          const hash = await bcrypt.hash(config.seedPasswords[i], 12);
+          await client.query('INSERT INTO users (username, password_hash, full_name) VALUES ($1, $2, $3) ON CONFLICT (username) DO NOTHING', [username, hash, name]);
+        }
+      }
+    }
+    await client.query('COMMIT');
+  } catch {
+    await client.query('ROLLBACK').catch(() => {});
+    throw new Error('No se pudo inicializar PostgreSQL. Revisa conexión, permisos y configuración.');
+  } finally { client.release(); }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let pool;
+  try {
+    const config = readConfig();
+    pool = createPool(config.databaseUrl);
+    await initialize(pool, config);
+    console.log('Base de datos inicializada.');
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  } finally { if (pool) await pool.end(); }
+}
+ARCHIVO_PERU_2
+
+cat > scripts/start.sh <<'ARCHIVO_PERU_3'
+#!/bin/sh
+set -eu
+node scripts/init-db.js
+exec node src/server.js
+ARCHIVO_PERU_3
+
+cat > scripts/smoke-test.js <<'ARCHIVO_PERU_4'
+import assert from 'node:assert/strict';
+const origin = process.env.TEST_BASE_URL ?? 'http://proxy';
+const token = html => html.match(/name="_csrf" value="([a-f0-9]+)"/)[1];
+for (const [i, username] of ['demo_ana', 'demo_luis'].entries()) {
+  let cookie = '';
+  const request = async (path, options = {}) => {
+    const response = await fetch(origin + path, { redirect: 'manual', ...options, headers: { cookie } });
+    const set = response.headers.getSetCookie();
+    if (set.length) cookie = set[0].split(';')[0];
+    return response;
+  };
+  const page = await request('/login');
+  const login = await request('/login', { method: 'POST', body: new URLSearchParams({ _csrf: token(await page.text()), username, password: process.env[`SEED_USER${i + 1}_PASSWORD`] }) });
+  assert.equal(login.status, 302);
+  assert.equal(login.headers.get('location'), '/welcome');
+  const welcome = await request('/welcome');
+  const html = await welcome.text();
+  assert.match(html, /Bienvenido, /);
+  const previous = cookie;
+  assert.equal((await request('/logout', { method: 'POST', body: new URLSearchParams({ _csrf: token(html) }) })).status, 302);
+  const denied = await fetch(origin + '/welcome', { redirect: 'manual', headers: { cookie: previous } });
+  assert.equal(denied.headers.get('location'), '/login');
+  console.log(`${username}: login, bienvenida y logout correctos.`);
+}
+console.log('Smoke test completado.');
+ARCHIVO_PERU_4
+
+cat > scripts/persistence-row.js <<'ARCHIVO_PERU_5'
+import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { createPool } from '../src/db.js';
+const pool = createPool(process.env.DATABASE_URL);
+try {
+  if (process.argv[2] === 'create') {
+    const username = `control_${randomBytes(8).toString('hex')}`;
+    const result = await pool.query("INSERT INTO users (username, password_hash, full_name) SELECT $1, password_hash, 'Control de persistencia' FROM users WHERE username='demo_ana' RETURNING id, username, created_at", [username]);
+    assert.equal(result.rowCount, 1, 'Se requiere demo_ana para preparar el control.');
+    console.log(JSON.stringify(result.rows[0]));
+  } else {
+    const expected = JSON.parse(readFileSync(0, 'utf8'));
+    const result = await pool.query('SELECT id, username, created_at FROM users WHERE username=$1', [expected.username]);
+    assert.equal(result.rowCount, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.rows[0])), expected);
+    console.log(`Persistencia verificada: ID ${expected.id}, fecha ${expected.created_at}.`);
+    await pool.query('DELETE FROM users WHERE username=$1 AND id=$2', [expected.username, expected.id]);
+  }
+} finally { await pool.end(); }
+ARCHIVO_PERU_5
+
+cat > scripts/test-local.sh <<'ARCHIVO_PERU_6'
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+for test_file in tests/config.test.js tests/auth.test.js; do
+  docker compose exec -T -w /app/src app node --input-type=module < "$test_file"
+done
+ARCHIVO_PERU_6
+
+cat > scripts/verify-persistence.sh <<'ARCHIVO_PERU_7'
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+control_file=$(mktemp)
+restore() {
+  rm -f "$control_file"
+  docker compose up -d --wait app proxy >/dev/null
+}
+trap restore EXIT
+docker compose exec -T app node scripts/persistence-row.js create > "$control_file"
+docker compose stop app proxy
+docker compose up -d --force-recreate --wait --wait-timeout 120 db
+docker compose up -d --wait --wait-timeout 120 app proxy
+docker compose exec -T app node scripts/persistence-row.js verify < "$control_file"
+docker compose exec -T app npm run smoke
+ARCHIVO_PERU_7
+
+cat > scripts/repair-codespace-network.sh <<'ARCHIVO_PERU_8'
+#!/usr/bin/env bash
+# Reparación específica para Codespaces con Docker nft y FORWARD legacy DROP.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if ! sudo iptables-legacy -S FORWARD | head -1 | grep -qx -- '-P FORWARD DROP'; then
+  echo 'No se detectó el bloqueo legacy conocido; no se modificaron reglas.'
+  exit 0
+fi
+app_id=$(docker compose ps -aq app)
+if [ -z "$app_id" ]; then
+  echo 'Primero crea los servicios con docker compose up -d.' >&2
+  exit 1
+fi
+network_ids=$(docker inspect "$app_id" --format '{{range .NetworkSettings.Networks}}{{.NetworkID}} {{end}}')
+for network_id in $network_ids; do
+  driver=$(docker network inspect "$network_id" --format '{{.Driver}}')
+  [ "$driver" = bridge ] || continue
+  bridge_name=$(docker network inspect "$network_id" --format '{{index .Options "com.docker.network.bridge.name"}}')
+  if [ -z "$bridge_name" ]; then bridge_name="br-${network_id:0:12}"; fi
+  if ! sudo iptables-legacy -C DOCKER-USER -i "$bridge_name" -o "$bridge_name" -j ACCEPT 2>/dev/null; then
+    sudo iptables-legacy -I DOCKER-USER 1 -i "$bridge_name" -o "$bridge_name" -j ACCEPT
+  fi
+  echo "Permitido tráfico dentro de $bridge_name; sin cambiar puertos ni política global."
+done
+ARCHIVO_PERU_8
+```
+
+### 0.6. Crear las pruebas y el README del proyecto nuevo
+
+```bash
+cat > tests/config.test.js <<'ARCHIVO_PERU_1'
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readConfig } from '../src/config.js';
+const env = { DATABASE_URL: 'postgresql://user@db/test', SESSION_SECRET: 'a'.repeat(64) };
+test('Valida configuración y no exige passwords con seed desactivado', () => {
+  assert.equal(readConfig(env).seed, false);
+  assert.throws(() => readConfig({ ...env, SESSION_SECRET: 'corto' }));
+  assert.throws(() => readConfig({ ...env, DATABASE_URL: 'invalid' }));
+  assert.throws(() => readConfig({ ...env, TRUST_PROXY: 'true' }));
+  assert.throws(() => readConfig({ ...env, TRUST_PROXY: '0.0.0.0/0' }));
+  assert.throws(() => readConfig({ ...env, SEED_ENABLED: 'true' }));
+  assert.throws(() => readConfig({ ...env, COOKIE_SECURE: 'yes' }));
+  assert.deepEqual(readConfig({ ...env, TRUST_PROXY: '172.30.10.2' }).trustProxy, ['172.30.10.2']);
+});
+ARCHIVO_PERU_1
+
+cat > tests/auth.test.js <<'ARCHIVO_PERU_2'
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import pg from 'pg';
+import bcrypt from 'bcrypt';
+import { readConfig } from '../src/config.js';
+import { createApp } from '../src/app.js';
+import { initialize } from '../scripts/init-db.js';
+
+const base = process.env.DATABASE_URL;
+test('Integración de autenticación con PostgreSQL aislado', { skip: !base, timeout: 90000 }, async t => {
+  const database = `test_peru_${randomBytes(8).toString('hex')}`;
+  const admin = new pg.Pool({ connectionString: base });
+  let pool, server;
+  try {
+    // Identificador generado internamente, nunca proviene de una entrada HTTP.
+    await admin.query(`CREATE DATABASE "${database}"`);
+    const url = new URL(base); url.pathname = `/${database}`;
+    pool = new pg.Pool({ connectionString: url.toString(), max: 5 });
+    const passwords = [randomBytes(20).toString('hex'), randomBytes(20).toString('hex')];
+    const config = readConfig({ DATABASE_URL: url.toString(), SESSION_SECRET: randomBytes(32).toString('hex'),
+      SEED_ENABLED: 'true', SEED_USER1_PASSWORD: passwords[0], SEED_USER2_PASSWORD: passwords[1] });
+    await initialize(pool, config);
+    const original = (await pool.query('SELECT * FROM users ORDER BY id')).rows;
+    await initialize(pool, { ...config, seedPasswords: ['different-password', 'different-password'] });
+    assert.deepEqual((await pool.query('SELECT * FROM users ORDER BY id')).rows, original);
+    assert.equal(await bcrypt.compare(passwords[0], original[0].password_hash), true);
+    assert.notEqual(original[0].password_hash, passwords[0]);
+    await initialize(pool, { ...config, seed: false, seedPasswords: [] });
+    const app = await createApp(config, pool);
+    server = app.listen(0, '0.0.0.0');
+    await new Promise(resolve => server.once('listening', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const browser = () => {
+      let cookie = '';
+      return { get cookie() { return cookie; }, async request(path, options = {}) {
+        const response = await fetch(origin + path, { redirect: 'manual', ...options,
+          headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
+        const set = response.headers.getSetCookie();
+        if (set.length) cookie = set[0].split(';')[0];
+        return response;
+      }};
+    };
+    const token = html => html.match(/name="_csrf" value="([a-f0-9]+)"/)[1];
+    const login = async (b, username, password) => {
+      const page = await b.request('/login');
+      return b.request('/login', { method: 'POST', body: new URLSearchParams({ username, password, _csrf: token(await page.text()) }) });
+    };
+    await t.test('Dos usuarios, regeneración de sesión, bienvenida y logout', async () => {
+      for (const [i, username] of ['demo_ana', 'demo_luis'].entries()) {
+        const b = browser();
+        const first = await b.request('/login');
+        assert.match(first.headers.get('set-cookie'), /HttpOnly/);
+        assert.match(first.headers.get('set-cookie'), /SameSite=Lax/);
+        const old = b.cookie;
+        const response = await login(b, username, passwords[i]);
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get('location'), '/welcome');
+        assert.notEqual(b.cookie, old);
+        const welcome = await b.request('/welcome');
+        assert.equal(welcome.headers.get('cache-control'), 'no-store');
+        const html = await welcome.text();
+        assert.match(html, new RegExp(`Bienvenido, ${original[i].full_name}`));
+        assert.match(html, /Machu Picchu/);
+        const authorizedCookie = b.cookie;
+        const logout = await b.request('/logout', { method: 'POST', body: new URLSearchParams({ _csrf: token(html) }) });
+        assert.equal(logout.status, 302);
+        const reused = await fetch(origin + '/welcome', { redirect: 'manual', headers: { cookie: authorizedCookie } });
+        assert.equal(reused.headers.get('location'), '/login');
+      }
+    });
+    await t.test('Inválidos, SQL, CSRF y rutas protegidas', async () => {
+      const b = browser();
+      assert.equal((await b.request('/welcome')).headers.get('location'), '/login');
+      for (const [username, password] of [['demo_ana', 'incorrecta'], ['no_existe', 'incorrecta'], ["' OR 1=1 --", 'incorrecta']]) {
+        const response = await login(b, username, password);
+        assert.equal(response.status, 401);
+        assert.match(await response.text(), /Usuario o contraseña incorrectos/);
+        assert.equal((await b.request('/welcome')).headers.get('location'), '/login');
+      }
+      assert.equal((await b.request('/login', { method: 'POST', body: new URLSearchParams({ username: 'demo_ana', password: passwords[0] }) })).status, 403);
+      assert.equal((await b.request('/logout', { method: 'POST', body: new URLSearchParams({ _csrf: 'é'.repeat(64) }) })).status, 403);
+      assert.equal((await pool.query('SELECT count(*)::int AS n FROM users')).rows[0].n, 2);
+    });
+    await t.test('Escapa el nombre en HTML', async () => {
+      await pool.query('UPDATE users SET full_name=$1 WHERE username=$2', ['<script>alert(1)</script>', 'demo_ana']);
+      const b = browser(); await login(b, 'demo_ana', passwords[0]);
+      const html = await (await b.request('/welcome')).text();
+      assert.ok(!html.includes('<script>alert(1)</script>'));
+      assert.match(html, /&lt;script&gt;/);
+    });
+    await t.test('Limita los intentos de login', async () => {
+      const b = browser(); let status;
+      for (let i = 0; i < 11; i++) status = (await login(b, 'no_existe', 'incorrecta')).status;
+      assert.equal(status, 429);
+    });
+    await t.test('Cookie Secure exige un proxy explícitamente confiable', async () => {
+      for (const trusted of [false, ['loopback']]) {
+        const secureApp = await createApp({ ...config, secure: true, trustProxy: trusted }, pool);
+        const secureServer = secureApp.listen(0, '127.0.0.1');
+        await new Promise(resolve => secureServer.once('listening', resolve));
+        try {
+          const response = await fetch(`http://127.0.0.1:${secureServer.address().port}/login`, { headers: { 'x-forwarded-proto': 'https' } });
+          if (trusted) assert.match(response.headers.get('set-cookie'), /; Secure/);
+          else assert.equal(response.headers.get('set-cookie'), null);
+        } finally { await new Promise(resolve => secureServer.close(resolve)); }
+      }
+    });
+    await t.test('Salud y DB no disponible', async () => {
+      assert.equal((await fetch(origin + '/health')).status, 200);
+      assert.equal((await fetch(origin + '/ready')).status, 200);
+      await pool.end(); pool = null;
+      assert.equal((await fetch(origin + '/ready')).status, 503);
+      assert.equal((await fetch(origin + '/health')).status, 200);
+    });
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
+    if (pool) await pool.end();
+    await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+    await admin.end();
+  }
+});
+ARCHIVO_PERU_2
+
+cat > README.md <<'README_PERU_NUEVO'
+# Descubre el Perú
+
+Aplicación de turismo del Perú con autenticación PostgreSQL y tres contenedores.
+
+## Ejecutar desde Codespaces
+
+Desde la raíz del proyecto:
+
+    node scripts/generate-env.js
+    docker compose up -d --build --wait
+    docker compose ps
+    curl -f http://localhost/health
+    curl -f http://localhost/ready
+    bash scripts/test-local.sh
+    docker compose exec -T app npm run smoke
+    bash scripts/verify-persistence.sh
+
+Consulta las credenciales ficticias en tu .env privado. No lo publiques.
+
+## Instrucciones completas
+
+[Guía de construcción, HTTPS, Docker Hub y Blitz](https://github.com/Renzo1818/-usil-cloud-lab/blob/dev/README.md).
+README_PERU_NUEVO
+```
+
+Los scripts shell se invocan con `bash` o `sh`, por lo que no requieren `chmod +x`. La imagen ejecuta `scripts/start.sh` mediante `sh`. El proyecto nuevo recibe un README breve con los comandos básicos y un enlace a esta guía completa.
+
+### 0.7. Comprobar los archivos antes de levantar Docker
+
+```bash
+find src scripts tests -type f -name '*.js' -exec node --check {} \;
+for script in scripts/*.sh; do
+  bash -n "$script"
+done
+node tests/config.test.js
+node --input-type=module -e "await import('./src/app.js'); await import('./scripts/init-db.js'); console.log('Módulos de aplicación cargados.');"
+npm ls --depth=0
+git status --short
+```
+
+Estos comandos comprueban sintaxis, configuración y dependencias. Todavía no prueban PostgreSQL ni el login: esas comprobaciones se ejecutan en las secciones 3 y 4. No inicies la app antes de generar `.env` en la sección 2.
+
+### 0.8. Crear un repositorio GitHub nuevo y hacer el primer push
+
+Si deseas publicar esta reconstrucción en tu cuenta, crea un repositorio nuevo; no reutilices el remoto del proyecto original. Configura tu identidad local solo si Git todavía no la conoce:
+
+```bash
+if ! git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+  read -r -p 'Tu nombre para los commits: ' REPLICA_GIT_NAME
+  read -r -p 'Tu correo de GitHub o correo noreply: ' REPLICA_GIT_EMAIL
+  git config user.name "$REPLICA_GIT_NAME"
+  git config user.email "$REPLICA_GIT_EMAIL"
+fi
+git add README.md package.json package-lock.json .gitignore .dockerignore .env.example .devcontainer Dockerfile docker-compose.yml src db nginx scripts tests
+git diff --cached --stat
+git commit -m "Crea Descubre el Perú con autenticación y contenedores"
+```
+
+Con [GitHub CLI](https://cli.github.com/) disponible, publica el primer commit en un nombre de repositorio que no exista en tu cuenta:
+
+```bash
+if ! gh auth status; then
+  gh auth login
+fi
+read -r -p 'Repositorio nuevo (tu-usuario/nombre-nuevo): ' REPLICA_GITHUB_REPO
+gh repo create "$REPLICA_GITHUB_REPO" --public --source=. --remote=origin --push
+```
+
+Si la cuenta usa `GITHUB_TOKEN`, GitHub CLI puede utilizar esa sesión sin solicitar otro token. No introduzcas credenciales en el README ni en el código. El comando publica `dev` porque esa es la rama inicial; no ejecutes `git pull origin dev` antes de crear este remoto y publicar la rama.
+
+Si deseas abrir un Codespace específicamente para el repositorio nuevo:
+
+```bash
+gh codespace create --repo "$REPLICA_GITHUB_REPO" --branch dev
+gh codespace list
+gh codespace code --web
+```
+
+Al abrirlo, su raíz será el proyecto y se aplicará `.devcontainer/devcontainer.json`. Si ya trabajabas dentro de un Codespace y añadiste la configuración a su raíz, usa **Dev Containers: Rebuild Container** desde la paleta de comandos para aplicarla. Una configuración en una subcarpeta no cambia automáticamente el contenedor del Codespace padre.
+
+Continúa en la **sección 2** para generar secretos y en la **sección 3** para construir y ejecutar los tres contenedores. Las instrucciones de Docker Hub y Blitz de las secciones 6 a 8 también se aplican a este repositorio nuevo, usando tu namespace y los valores de tu cuenta.
 
 ## 1. Obtener el código y preparar Codespaces
 
@@ -573,6 +1474,8 @@ Para pedir ayuda, comparte solo mensajes sanitizados. Las salidas completas de `
 ## Funcionamiento y estado comprobado
 
 Las rutas principales son `/login`, `/welcome` y `/logout` (POST). `/` redirige según la sesión. La aplicación usa consultas parametrizadas, bcrypt, salida escapada de EJS, CSRF y sesiones PostgreSQL con cookies HttpOnly, SameSite=Lax y duración de 30 minutos. El límite de login es de memoria por instancia; se reinicia con el proceso y no es distribuido.
+
+La ruta de construcción de la sección 0 se comprobó extrayendo sus comandos y ejecutándolos en una carpeta temporal vacía: generó 25 archivos idénticos a los del proyecto, un `package.json` equivalente y un lockfile nuevo. Pasaron la comprobación de sintaxis JavaScript/shell, la carga de módulos, el test de configuración y la validación de Compose con un `.env` nuevo. La imagen resultante se construyó para `linux/amd64` con usuario `node`. Esa comprobación de reconstrucción no ejecutó un despliegue nuevo en GitHub o Blitz ni repitió el flujo con una nueva base PostgreSQL.
 
 Comprobaciones realizadas durante la implementación en Codespaces, el 21 de octubre de 2026 (Lima):
 
